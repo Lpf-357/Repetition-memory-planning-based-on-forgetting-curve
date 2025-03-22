@@ -115,8 +115,8 @@ def get_reviews_due_today():
         and entry["date"] != today  # 排除当天添加的学习卡片
     ]
     
-    # 按时间顺序排列（旧→新）
-    reviews_due.sort(key=lambda x: x["entry_date"])
+    # 按时间逆序排列（新→旧）
+    reviews_due.sort(key=lambda x: x["entry_date"], reverse=True)
     
     return reviews_due
 
@@ -185,7 +185,7 @@ def render_progress():
         return "尚未添加任何学习项目。"
     
     # Sort data by date, oldest first (chronological order)
-    data.sort(key=lambda x: x["date"], reverse=False)  # 按时间顺序排序（从旧到新）
+    data.sort(key=lambda x: x["date"], reverse=True)  # 按时间逆序排序（从新到旧）
     
     markdown = "## 学习进度\n\n"
     
