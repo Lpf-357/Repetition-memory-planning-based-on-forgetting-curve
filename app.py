@@ -112,7 +112,7 @@ def get_reviews_due_today():
         for entry in data 
         for i, review in enumerate(entry["reviews"])
         if review["dueDate"] == today and not review["completed"]
-        and entry["date"] != today  # 排除当天添加的学习卡片
+        # 移除"排除当天添加的学习卡片"条件，允许显示所有需要复习的卡片
     ]
     
     # 按时间逆序排列（新→旧）
@@ -697,29 +697,82 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
         
         # Tab 2: Today's Reviews
         with gr.TabItem("今日复习"):
-            # 将组件定义移至标签页内部
+            # First display the reviews
             today_reviews_md = gr.Markdown(render_today_reviews())
+            feedback_msg = gr.Markdown("")  # For user feedback
             
-            with gr.Row():
-                # Create buttons for reviews due today
+            # Create a single dynamic button
+            mark_complete_btn = gr.Button("完成复习", variant="primary")
+            
+            # Update button text and state based on reviews
+            def update_review_ui():
                 reviews = get_reviews_due_today()
                 if reviews:
-                    for i in range(min(len(reviews), 10)):  # Limit to 10 buttons
-                        btn = gr.Button(f"完成复习 #{i+1}")
-                        # Use a closure to capture the correct index
-                        btn.click(
-                            fn=lambda idx=i: mark_review_completed(idx),
-                            inputs=[],
-                            outputs=[today_reviews_md]  # 只更新当前标签页的组件
-                        ).then(
-                            # 完成复习后，触发进度页刷新按钮，确保进度页也会更新
-                            fn=lambda: None,
-                            inputs=None,
-                            outputs=None,
-                            js="() => { document.querySelector('#refresh_progress_trigger button').click(); }"
-                        )
+                    return gr.update(value=f"完成复习（剩余 {len(reviews)} 项）", interactive=True), render_today_reviews(), ""
                 else:
-                    gr.Markdown("今天没有需要复习的项目。")
+                    return gr.update(value="今日无复习项目", interactive=False), "今天没有需要复习的项目。", ""
+            
+            # Enhanced mark_review_completed function
+            def mark_review_completed_enhanced():
+                data = load_data()
+                reviews = get_reviews_due_today()
+                
+                if not reviews:
+                    return "今天没有需要复习的项目。", "没有待复习项目"
+                
+                review = reviews[0]  # Always take the first review
+                entry = next((e for e in data if e["date"] == review["entry_date"]), None)
+                
+                if entry:
+                    entry["reviews"][review["review_index"]]["completed"] = True
+                    save_data(data)
+                    return render_today_reviews(), "复习已完成！"
+                
+                return render_today_reviews(), "处理复习时出错，请重试。"
+            
+            # Button click event chain
+            # 添加HTML标记以支持update_review_ui事件触发
+            custom_js = """
+            <script>
+            // 为update_review_ui事件添加监听器
+            document.addEventListener('update_review_ui', () => {
+                // 模拟点击update_review_ui按钮
+                const reviewUpdateButton = document.querySelector('#review_update_button button');
+                if (reviewUpdateButton) {
+                    reviewUpdateButton.click();
+                }
+            });
+            </script>
+            """
+            gr.HTML(custom_js, visible=False)
+            
+            # 隐藏的更新触发器
+            with gr.Row(visible=False):
+                review_update_btn = gr.Button("更新复习UI", elem_id="review_update_button")
+                review_update_btn.click(
+                    fn=update_review_ui,
+                    outputs=[mark_complete_btn, today_reviews_md, feedback_msg]
+                )
+            
+            # 主按钮事件
+            mark_complete_btn.click(
+                fn=mark_review_completed_enhanced,
+                outputs=[today_reviews_md, feedback_msg]
+            ).then(
+                fn=update_review_ui,
+                outputs=[mark_complete_btn, today_reviews_md, feedback_msg]
+            ).then(
+                fn=lambda: None,
+                js="""
+                () => { 
+                    // Refresh progress tab
+                    document.querySelector('#refresh_progress_trigger button').click();
+                }
+                """
+            )
+            
+            # 使用正确的方式初始化UI：通过tabs的选择事件
+            # 不再使用错误的tabs.select直接调用方法
         
         # Tab 3: Progress
         with gr.TabItem("学习进度") as progress_tab:
@@ -820,6 +873,19 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
                 const activeTab = Array.from(document.querySelectorAll('.tabs button')).findIndex(btn => btn.classList.contains('active'));
                 // 同时更新添加学习页的下拉菜单
                 document.querySelector('#refresh_dropdowns_trigger button').click();
+                
+                // 如果是复习标签页，初始化复习UI
+                if (activeTab === 1) {
+                    // 调用标签页2的初始化
+                    setTimeout(() => {
+                        const reviews = document.querySelector("#tab_2");
+                        if (reviews) {
+                            // 更新复习按钮状态
+                            const event = new Event("update_review_ui");
+                            document.dispatchEvent(event);
+                        }
+                    }, 200);
+                }
             }, 100);
         }
         """
