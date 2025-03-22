@@ -8,9 +8,17 @@ import calendar
 def load_data():
     """Load data from JSON file, or initialize empty list if file doesn't exist."""
     try:
+        # Try to open and read the file
         with open("data.json", "r", encoding="utf-8") as f:
-            return json.load(f)
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                # If file exists but has invalid JSON (e.g., empty file)
+                return []
     except FileNotFoundError:
+        # If file doesn't exist, create it with an empty list
+        with open("data.json", "w", encoding="utf-8") as f:
+            json.dump([], f)
         return []
 
 def save_data(data):
@@ -29,6 +37,8 @@ def delete_entry(date_str):
 def get_existing_dates():
     """Get all dates that have learning entries."""
     data = load_data()
+    if not data:
+        return []
     # Sort dates in descending order (newest first)
     dates = sorted((entry["date"] for entry in data), reverse=True)
     return dates
@@ -68,43 +78,57 @@ def format_date(year, month, day):
 # Core functionality
 def add_learning_entry(year, month, day, item1, item2, item3):
     """Add a new learning entry with up to three items or update an existing one."""
-    # Format the date from components
-    date_str = format_date(year, month, day)
-    
-    # Filter out empty items
-    items = [item for item in [item1, item2, item3] if item and item.strip()]
-    
-    if not items:
-        return "请至少添加一个学习项目", None, None
-    
-    # Load existing data
-    data = load_data()
-    
-    # Check if an entry for this date already exists
-    for existing_entry in data:
-        if existing_entry["date"] == date_str:
-            # Update the existing entry
-            existing_entry["items"] = items  # Replace with new items instead of combining
-            save_data(data)
-            return "已更新当日学习项目！", render_today_reviews(), render_progress()
-    
-    # If no existing entry, create a new one
-    entry = {
-        "date": date_str,
-        "items": items,
-        "reviews": calculate_review_dates(date_str)
-    }
-    
-    # Add new entry
-    data.append(entry)
-    save_data(data)
-    
-    # Return success message and update both today's reviews and progress
-    return "学习项目已添加！", render_today_reviews(), render_progress()
+    try:
+        # Validate inputs first to prevent format_date errors
+        if not year or not month or not day:
+            return "请输入有效的日期", render_today_reviews(), render_progress()
+            
+        # Format the date from components
+        try:
+            date_str = format_date(year, month, day)
+        except Exception as e:
+            return f"日期格式错误: {str(e)}", render_today_reviews(), render_progress()
+        
+        # Filter out empty items
+        items = [item for item in [item1, item2, item3] if item and item.strip()]
+        
+        if not items:
+            return "请至少添加一个学习项目", render_today_reviews(), render_progress()
+        
+        # Load existing data
+        data = load_data()
+        
+        # Check if an entry for this date already exists
+        for existing_entry in data:
+            if existing_entry["date"] == date_str:
+                # Update the existing entry
+                existing_entry["items"] = items  # Replace with new items instead of combining
+                save_data(data)
+                return "已更新当日学习项目！", render_today_reviews(), render_progress()
+        
+        # If no existing entry, create a new one
+        entry = {
+            "date": date_str,
+            "items": items,
+            "reviews": calculate_review_dates(date_str)
+        }
+        
+        # Add new entry
+        data.append(entry)
+        save_data(data)
+        
+        # Return success message and update both today's reviews and progress
+        return "学习项目已添加！", render_today_reviews(), render_progress()
+    except Exception as e:
+        print(f"添加学习项目出错: {str(e)}")
+        return f"添加学习项目出错: {str(e)}", render_today_reviews(), render_progress()
 
 def get_reviews_due_today():
     """Get all reviews due today that haven't been completed."""
     data = load_data()
+    if not data:
+        return []
+        
     today = datetime.now().strftime("%Y-%m-%d")
     
     reviews_due = [
@@ -585,6 +609,24 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
     .hidden {
         display: none;
     }
+    /* 添加加载状态指示器 */
+    .loading-indicator {
+        text-align: center;
+        padding: 20px;
+        color: #666;
+    }
+    .loading-spinner {
+        display: inline-block;
+        width: 50px;
+        height: 50px;
+        border: 3px solid rgba(0, 0, 0, 0.1);
+        border-radius: 50%;
+        border-top-color: #2e86de;
+        animation: spin 1s ease-in-out infinite;
+    }
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
     </style>
     """)
     
@@ -632,8 +674,9 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
             with gr.Row():
                 # Dropdown to select existing dates
                 existing_dates_dropdown = gr.Dropdown(
-                    choices=get_existing_dates(),
-                    label="已有学习日期"
+                    choices=get_existing_dates() or [],
+                    label="已有学习日期",
+                    value=None
                 )
                 load_existing_btn = gr.Button("加载已有学习项目")
             
@@ -667,7 +710,7 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
             # Function to load existing items for a selected date
             def load_existing_items(date_str):
                 if not date_str:
-                    return gr.update(), gr.update(), gr.update()
+                    return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
                 
                 # Parse the date to update the date dropdowns
                 try:
@@ -685,7 +728,9 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
                     item3_value = items[2] if len(items) > 2 else ""
                     
                     return gr.update(value=year_value), gr.update(value=month_value), gr.update(value=day_value), gr.update(value=item1_value), gr.update(value=item2_value), gr.update(value=item3_value)
-                except:
+                except Exception as e:
+                    # Log the error and provide default values
+                    print(f"Error loading existing items: {str(e)}")
                     return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
             
             # Connect the load button to load existing items
@@ -698,7 +743,10 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
         # Tab 2: Today's Reviews
         with gr.TabItem("今日复习"):
             # First display the reviews
-            today_reviews_md = gr.Markdown(render_today_reviews())
+            today_reviews_md = gr.Markdown(
+                render_today_reviews(),
+                elem_id="today_reviews_area"
+            )
             feedback_msg = gr.Markdown("")  # For user feedback
             
             # Create a single dynamic button
@@ -706,11 +754,15 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
             
             # Update button text and state based on reviews
             def update_review_ui():
-                reviews = get_reviews_due_today()
-                if reviews:
-                    return gr.update(value=f"完成复习（剩余 {len(reviews)} 项）", interactive=True), render_today_reviews(), ""
-                else:
-                    return gr.update(value="今日无复习项目", interactive=False), "今天没有需要复习的项目。", ""
+                try:
+                    reviews = get_reviews_due_today()
+                    if reviews:
+                        return gr.update(value=f"完成复习（剩余 {len(reviews)} 项）", interactive=True), render_today_reviews(), ""
+                    else:
+                        return gr.update(value="今日无复习项目", interactive=False), "今天没有需要复习的项目。", ""
+                except Exception as e:
+                    print(f"更新复习UI出错: {str(e)}")
+                    return gr.update(value="今日复习（加载错误）", interactive=False), "加载复习内容时出错，请刷新页面重试。", str(e)
             
             # Enhanced mark_review_completed function
             def mark_review_completed_enhanced():
@@ -720,13 +772,16 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
                 if not reviews:
                     return "今天没有需要复习的项目。", "没有待复习项目"
                 
-                review = reviews[0]  # Always take the first review
-                entry = next((e for e in data if e["date"] == review["entry_date"]), None)
-                
-                if entry:
-                    entry["reviews"][review["review_index"]]["completed"] = True
-                    save_data(data)
-                    return render_today_reviews(), "复习已完成！"
+                try:
+                    review = reviews[0]  # Always take the first review
+                    entry = next((e for e in data if e["date"] == review["entry_date"]), None)
+                    
+                    if entry:
+                        entry["reviews"][review["review_index"]]["completed"] = True
+                        save_data(data)
+                        return render_today_reviews(), "复习已完成！"
+                except Exception as e:
+                    return render_today_reviews(), f"处理复习时出错: {str(e)}"
                 
                 return render_today_reviews(), "处理复习时出错，请重试。"
             
@@ -788,7 +843,10 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
                     delete_btn = gr.Button("删除记录", variant="stop")
                 
                 # 进度展示在下（自动置顶后无需额外样式）
-                progress_md = gr.Markdown(render_progress())
+                progress_md = gr.Markdown(
+                render_progress(),
+                elem_id="progress_area"
+            )
                 
             
             # Connect the delete button to the deletion function - scoped to this tab
@@ -837,34 +895,46 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
     # 处理标签页切换事件
     def on_tab_select(tab_index):
         """处理标签页切换事件"""
-        if tab_index == 0:  # "添加学习"页
+        try:
+            existing_dates = get_existing_dates() or []  # 确保始终是列表
+            
+            if tab_index == 0:  # "添加学习"页
+                return (
+                    gr.update(choices=existing_dates),  # 更新existing_dates_dropdown
+                    gr.update(),  # today_reviews_md无需更新
+                    gr.update(choices=existing_dates),  # 更新delete_date_dropdown
+                    render_progress()  # 更新progress_md
+                )
+            elif tab_index == 1:  # "今日复习"页
+                return (
+                    gr.update(), 
+                    render_today_reviews(),  # 立即更新今日复习内容
+                    gr.update(), 
+                    gr.update()
+                )
+            elif tab_index == 2:  # "学习进度"页
+                return (
+                    gr.update(),
+                    gr.update(),
+                    gr.update(choices=existing_dates),
+                    render_progress()
+                )
+            else:
+                return (gr.update(), gr.update(), gr.update(), gr.update())
+        except Exception as e:
+            print(f"标签页切换错误: {str(e)}")
+            # 出现错误时提供安全的默认值
             return (
-                gr.update(choices=get_existing_dates()),  # 更新existing_dates_dropdown
-                gr.update(),  # today_reviews_md无需更新
-                gr.update(choices=get_existing_dates()),  # 更新delete_date_dropdown
-                render_progress()  # 更新progress_md
+                gr.update(choices=[]), 
+                "加载内容时出错，请刷新页面重试。", 
+                gr.update(choices=[]), 
+                "加载内容时出错，请刷新页面重试。"
             )
-        elif tab_index == 1:  # "今日复习"页
-            return (
-                gr.update(), 
-                render_today_reviews(),  # 立即更新今日复习内容
-                gr.update(), 
-                gr.update()
-            )
-        elif tab_index == 2:  # "学习进度"页
-            return (
-                gr.update(),
-                gr.update(),
-                gr.update(choices=get_existing_dates()),
-                render_progress()
-            )
-        else:
-            return (gr.update(), gr.update(), gr.update(), gr.update())
 
     # 绑定新的标签页选择事件
+    # 使用tab_index作为参数而不是tabs对象
     tabs.select(
-        fn=on_tab_select,
-        inputs=[tabs],
+        fn=lambda tab_index: on_tab_select(tab_index),
         outputs=[
             existing_dates_dropdown, 
             today_reviews_md, 
@@ -873,10 +943,8 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
         ]
     ).then(
         # 仅当切换到"今日复习"页时更新按钮状态
-        fn=lambda tab_idx: update_review_ui() if tab_idx == 1 else (gr.update(), gr.update(), gr.update()),
-        inputs=[tabs],
-        outputs=[mark_complete_btn, today_reviews_md, feedback_msg],
-        js="(tab_idx) => tab_idx"  # 传递tab_index到后端
+        fn=lambda tab_index: update_review_ui() if tab_index == 1 else (gr.update(), gr.update(), gr.update()),
+        outputs=[mark_complete_btn, today_reviews_md, feedback_msg]
     )
     
     # 添加隐藏的刷新触发器按钮
@@ -907,6 +975,9 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
 
 # Launch the app
 if __name__ == "__main__":
+    # Run initialization to ensure data.json exists
+    load_data()
+    
     # We'll rely on the tab change event to populate the content
     # when the user switches tabs
     app.launch()
