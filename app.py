@@ -834,61 +834,49 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
         outputs=[existing_dates_dropdown, delete_date_dropdown]
     )
     
-    # Tab change events to refresh content when tabs are selected
-    def on_tab_change(tab_index):
-        print(f"Received tab_index: {tab_index}")
-        if tab_index == 0:  # 添加学习标签页
-            # 每次切换到添加学习页面都重新加载最新日期列表
-            return render_today_reviews(), gr.update(choices=get_existing_dates() or [])
-        elif tab_index == 1:  # 今日复习标签页
-            return render_today_reviews(), gr.update()
-        elif tab_index == 2:  # 学习进度标签页
-            # 每次切换到学习进度页面都重新加载最新日期列表
-            return render_progress(), gr.update(choices=get_existing_dates() or [])
+    # 处理标签页切换事件
+    def on_tab_select(tab_index):
+        """处理标签页切换事件"""
+        if tab_index == 0:  # "添加学习"页
+            return (
+                gr.update(choices=get_existing_dates()),  # 更新existing_dates_dropdown
+                gr.update(),  # today_reviews_md无需更新
+                gr.update(choices=get_existing_dates()),  # 更新delete_date_dropdown
+                render_progress()  # 更新progress_md
+            )
+        elif tab_index == 1:  # "今日复习"页
+            return (
+                gr.update(), 
+                render_today_reviews(),  # 立即更新今日复习内容
+                gr.update(), 
+                gr.update()
+            )
+        elif tab_index == 2:  # "学习进度"页
+            return (
+                gr.update(),
+                gr.update(),
+                gr.update(choices=get_existing_dates()),
+                render_progress()
+            )
         else:
-            return "", gr.update()
+            return (gr.update(), gr.update(), gr.update(), gr.update())
 
-    # 标签切换事件，直接更新所有组件
-    tabs.change(
-        fn=on_tab_change,
+    # 绑定新的标签页选择事件
+    tabs.select(
+        fn=on_tab_select,
+        inputs=[tabs],
         outputs=[
-            today_reviews_md,  # 今日复习Markdown
-            delete_date_dropdown  # 删除下拉菜单
-        ],
-        js="""
-        () => {
-            const tabIndex = Array.from(document.querySelectorAll('.tabs button')).findIndex(btn => btn.classList.contains('active'));
-            // 立即返回当前选中的标签索引
-            return tabIndex;
-        }
-        """
+            existing_dates_dropdown, 
+            today_reviews_md, 
+            delete_date_dropdown, 
+            progress_md
+        ]
     ).then(
-        fn=lambda: None,  # 空函数，不执行任何操作
-        inputs=None,
-        outputs=None,
-        js="""
-        () => {
-            // 触发对其他组件的更新，确保existing_dates_dropdown也会更新
-            setTimeout(() => {
-                const activeTab = Array.from(document.querySelectorAll('.tabs button')).findIndex(btn => btn.classList.contains('active'));
-                // 同时更新添加学习页的下拉菜单
-                document.querySelector('#refresh_dropdowns_trigger button').click();
-                
-                // 如果是复习标签页，初始化复习UI
-                if (activeTab === 1) {
-                    // 调用标签页2的初始化
-                    setTimeout(() => {
-                        const reviews = document.querySelector("#tab_2");
-                        if (reviews) {
-                            // 更新复习按钮状态
-                            const event = new Event("update_review_ui");
-                            document.dispatchEvent(event);
-                        }
-                    }, 200);
-                }
-            }, 100);
-        }
-        """
+        # 仅当切换到"今日复习"页时更新按钮状态
+        fn=lambda tab_idx: update_review_ui() if tab_idx == 1 else (gr.update(), gr.update(), gr.update()),
+        inputs=[tabs],
+        outputs=[mark_complete_btn, today_reviews_md, feedback_msg],
+        js="(tab_idx) => tab_idx"  # 传递tab_index到后端
     )
     
     # 添加隐藏的刷新触发器按钮
