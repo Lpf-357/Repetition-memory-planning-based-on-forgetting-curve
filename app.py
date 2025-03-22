@@ -761,7 +761,7 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
                 js="() => new Promise(resolve => setTimeout(() => resolve(), 3000))"
             )
     
-    # Add learning entry event
+# Add learning entry event
     add_btn.click(
         fn=add_learning_entry,
         inputs=[year_dropdown, month_dropdown, day_dropdown, item1, item2, item3],
@@ -772,7 +772,11 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
         outputs=result_msg,
         js="() => new Promise(resolve => setTimeout(() => resolve(), 3000))"
     ).then(
-        fn=lambda: gr.update(choices=get_existing_dates() or []),
+        # 修改这里：确保获取最新的日期列表并同时更新两个下拉菜单
+        fn=lambda: (
+            gr.update(choices=get_existing_dates() or []), 
+            gr.update(choices=get_existing_dates() or [])
+        ),
         inputs=None,
         outputs=[existing_dates_dropdown, delete_date_dropdown]
     )
@@ -781,47 +785,27 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
     def on_tab_change(tab_index):
         print(f"Received tab_index: {tab_index}")
         if tab_index == 0:  # 添加学习标签页
-            return {"__type__": "update", "value": ""}  # 返回空字符串，不会影响任何组件
+            # 每次切换到添加学习页面都重新加载最新日期列表
+            return render_today_reviews(), gr.update(choices=get_existing_dates() or [])
         elif tab_index == 1:  # 今日复习标签页
-            return {"__type__": "update", "value": render_today_reviews()}
+            return render_today_reviews(), gr.update()
         elif tab_index == 2:  # 学习进度标签页
-            return {"__type__": "update", "value": render_progress()}
+            # 每次切换到学习进度页面都重新加载最新日期列表
+            return render_progress(), gr.update(choices=get_existing_dates() or [])
         else:
-            return {"__type__": "update", "value": ""}
+            return "", gr.update()
 
-    # 标签切换事件，仅更新当前活动标签页的内容
+    # 标签切换事件，直接更新所有组件
     tabs.change(
         fn=on_tab_change,
-        outputs=[gr.Textbox(visible=False)],  # 使用隐藏的文本框作为中间值传递
+        outputs=[
+            today_reviews_md,  # 今日复习Markdown
+            delete_date_dropdown  # 删除下拉菜单
+        ],
         js="""
         () => {
             const tabIndex = Array.from(document.querySelectorAll('.tabs button')).findIndex(btn => btn.classList.contains('active'));
-            
-            // 基于当前标签页更新对应内容
-            setTimeout(() => {
-                const allMarkdowns = document.querySelectorAll('gradio-markdown');
-                
-                if (tabIndex === 1) {  // 今日复习标签页
-                    // 找到今日复习标签页中的Markdown组件并更新
-                    const reviewsTab = document.querySelectorAll('.tab-item')[1];
-                    if (reviewsTab) {
-                        const md = reviewsTab.querySelector('gradio-markdown');
-                        if (md && window.updateMarkdownValue) {
-                            window.updateMarkdownValue(md, result);
-                        }
-                    }
-                } else if (tabIndex === 2) {  // 学习进度标签页
-                    // 找到学习进度标签页中的Markdown组件并更新
-                    const progressTab = document.querySelectorAll('.tab-item')[2];
-                    if (progressTab) {
-                        const md = progressTab.querySelector('gradio-markdown');
-                        if (md && window.updateMarkdownValue) {
-                            window.updateMarkdownValue(md, result);
-                        }
-                    }
-                }
-            }, 100);
-            
+            // 立即返回当前选中的标签索引
             return tabIndex;
         }
         """
@@ -830,42 +814,13 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
         inputs=None,
         outputs=None,
         js="""
-        (result) => {
-            // 添加更新Markdown内容的辅助函数
-            if (!window.updateMarkdownValue) {
-                window.updateMarkdownValue = function(element, value) {
-                    // 获取实际的内部DOM元素并更新内容
-                    const inner = element.querySelector('.prose') || element;
-                    if (inner) inner.innerHTML = value;
-                };
-            }
-            
-            const tabIndex = parseInt(result);
-            if (isNaN(tabIndex)) return;
-            
-            // 获取所有标签页内容元素
-            const tabItems = document.querySelectorAll('.tab-item');
-            
-            if (tabIndex === 1) {  // 今日复习标签页
-                // 触发服务器端刷新
-                const reviewTab = tabItems[1];
-                if (reviewTab) {
-                    const md = reviewTab.querySelector('gradio-markdown');
-                    if (md) {
-                        gradioApp().querySelector('#refresh_reviews_trigger button').click();
-                    }
-                }
-            }
-            else if (tabIndex === 2) {  // 学习进度标签页
-                // 触发服务器端刷新
-                const progressTab = tabItems[2];
-                if (progressTab) {
-                    const md = progressTab.querySelector('gradio-markdown');
-                    if (md) {
-                        gradioApp().querySelector('#refresh_progress_trigger button').click();
-                    }
-                }
-            }
+        () => {
+            // 触发对其他组件的更新，确保existing_dates_dropdown也会更新
+            setTimeout(() => {
+                const activeTab = Array.from(document.querySelectorAll('.tabs button')).findIndex(btn => btn.classList.contains('active'));
+                // 同时更新添加学习页的下拉菜单
+                document.querySelector('#refresh_dropdowns_trigger button').click();
+            }, 100);
         }
         """
     )
@@ -874,6 +829,7 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
     with gr.Row(visible=False):
         refresh_reviews_btn = gr.Button("刷新今日复习", elem_id="refresh_reviews_trigger")
         refresh_progress_btn = gr.Button("刷新学习进度", elem_id="refresh_progress_trigger")
+        refresh_dropdowns_btn = gr.Button("刷新下拉菜单", elem_id="refresh_dropdowns_trigger")
         
         # 添加刷新按钮的事件处理
         refresh_reviews_btn.click(
@@ -884,6 +840,15 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
         refresh_progress_btn.click(
             fn=lambda: render_progress(),
             outputs=[progress_md]
+        )
+        
+        # 添加刷新下拉菜单的事件处理
+        refresh_dropdowns_btn.click(
+            fn=lambda: (
+                gr.update(choices=get_existing_dates() or []),
+                gr.update(choices=get_existing_dates() or [])
+            ),
+            outputs=[existing_dates_dropdown, delete_date_dropdown]
         )
 
 # Launch the app
