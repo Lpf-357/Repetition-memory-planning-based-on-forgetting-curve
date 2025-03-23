@@ -1,6 +1,7 @@
 import gradio as gr
 import json
 import os
+import requests
 from datetime import datetime, timedelta
 import calendar
 
@@ -871,6 +872,115 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
                 outputs=[delete_result_msg, existing_dates_dropdown],
                 js="() => new Promise(resolve => setTimeout(() => resolve(), 3000))"
             )
+            
+        # Tab 4: AI Analysis
+        with gr.TabItem("AI分析"):
+            gr.Markdown("### AI 分析\n选择一个日期范围，将学习数据发送给 AI 进行分析")
+            
+            with gr.Row():
+                gr.Markdown("#### 开始日期")
+            with gr.Row():
+                start_year = gr.Dropdown(label="年", choices=[str(y) for y in range(2023, 2027)], value=None)
+                start_month = gr.Dropdown(label="月", choices=[str(m) for m in range(1, 13)], value=None)
+                start_day = gr.Dropdown(label="日", choices=[str(d) for d in range(1, 32)], value=None)
+            
+            with gr.Row():
+                gr.Markdown("#### 结束日期")
+            with gr.Row():
+                end_year = gr.Dropdown(label="年", choices=[str(y) for y in range(2023, 2027)], value=None)
+                end_month = gr.Dropdown(label="月", choices=[str(m) for m in range(1, 13)], value=None)
+                end_day = gr.Dropdown(label="日", choices=[str(d) for d in range(1, 32)], value=None)
+            
+            send_to_ai_btn = gr.Button("AI分析")
+            ai_result_md = gr.Markdown()
+            
+            # Update day choices for start date
+            def update_start_days(year, month):
+                return update_days(year, month)
+            
+            start_year.change(fn=update_start_days, inputs=[start_year, start_month], outputs=[start_day])
+            start_month.change(fn=update_start_days, inputs=[start_year, start_month], outputs=[start_day])
+            
+            # Update day choices for end date
+            def update_end_days(year, month):
+                return update_days(year, month)
+            
+            end_year.change(fn=update_end_days, inputs=[end_year, end_month], outputs=[end_day])
+            end_month.change(fn=update_end_days, inputs=[end_year, end_month], outputs=[end_day])
+            
+            # Define send_to_ai function
+            def send_to_ai(start_year, start_month, start_day, end_year, end_month, end_day):
+                try:
+                    # Format dates
+                    start_date = format_date(int(start_year), int(start_month), int(start_day))
+                    end_date = format_date(int(end_year), int(end_month), int(end_day))
+                    
+                    if start_date > end_date:
+                        return "开始日期必须早于或等于结束日期。"
+                    
+                    data = load_data()
+                    filtered_data = [entry for entry in data if start_date <= entry["date"] <= end_date]
+                    
+                    if not filtered_data:
+                        return "在所选时间段内没有找到数据。"
+                    
+                    # Include all required fields: date, items, and reviews
+                    extracted_data = [
+                        {
+                            "date": entry["date"],        # Learning date in yyyy-MM-dd format
+                            "items": entry["items"],      # Learning items (up to 3 strings)
+                            "reviews": entry["reviews"]   # Review data (7 objects with dueDate and completed fields)
+                        } for entry in filtered_data
+                    ]
+                    
+                    # Create payload with data and instructions
+                    payload = {
+                        "data": extracted_data,
+                        "instructions": """请分析用户提供的学习数据，数据包含以下字段：date：学习日期，格式为"yyyy-MM-dd"。items：学习项目，最多三个，每个项目为字符串。reviews：复习情况，包含七个对象，每个对象有dueDate（复习日期）和completed（是否完成）两个字段。
+基于这些数据，请完成以下任务：分析用户最近的学习情况，包括学习频率、学习内容的种类和分布。统计复习任务的完成情况，指出哪些复习阶段的完成率较高或较低。提供学习和复习的改进建议，帮助用户优化学习计划和方法。以清晰、简洁的方式呈现分析结果，便于用户理解和应用。"""
+                    }
+                    
+                    # API endpoint (should be replaced with actual endpoint)
+                    API_URL = "https://your-api-endpoint.com/analyze"
+                    
+                    # Send request to AI API
+                    response = requests.post(API_URL, json=payload)
+                    
+                    if response.status_code == 200:
+                        try:
+                            result = response.json()
+                            
+                            # Parse the AI analysis results
+                            frequency = result.get("learning_frequency", "No data available")
+                            distribution = result.get("content_distribution", "No data available")
+                            completion = result.get("review_completion", "No data available")
+                            suggestions = result.get("suggestions", [])
+                            
+                            # Format as Markdown
+                            markdown = (
+                                f"**学习频率分析:**\n{frequency}\n\n"
+                                f"**学习内容分布:**\n{distribution}\n\n"
+                                f"**复习完成情况:**\n{completion}\n\n"
+                                f"**改进建议:**\n"
+                            )
+                            
+                            for sugg in suggestions:
+                                markdown += f"- {sugg}\n"
+                                
+                            return markdown
+                        except json.JSONDecodeError:
+                            return "API 响应不是有效的 JSON 格式。"
+                    else:
+                        return f"API 请求失败，状态码: {response.status_code}"
+                except Exception as e:
+                    return f"错误: {str(e)}"
+            
+            # Connect the button to the function
+            send_to_ai_btn.click(
+                fn=send_to_ai,
+                inputs=[start_year, start_month, start_day, end_year, end_month, end_day],
+                outputs=[ai_result_md]
+            )
     
 # Add learning entry event
     add_btn.click(
@@ -918,6 +1028,13 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
                     gr.update(),
                     gr.update(choices=existing_dates),
                     render_progress()
+                )
+            elif tab_index == 3:  # "AI Analysis"页
+                return (
+                    gr.update(),
+                    gr.update(),
+                    gr.update(choices=existing_dates),
+                    gr.update()
                 )
             else:
                 return (gr.update(), gr.update(), gr.update(), gr.update())
