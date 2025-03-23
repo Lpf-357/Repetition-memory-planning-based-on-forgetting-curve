@@ -4,6 +4,13 @@ import os
 import requests
 from datetime import datetime, timedelta
 import calendar
+from openai import OpenAI
+
+# Initialize OpenAI client
+client = OpenAI(
+    base_url='https://api.deepseek.com',  # DeepSeek API URL
+    api_key='sk-e46f24e9a85c4fe4ad3a14eb81929326',  # DeepSeek API Key
+)
 
 # Data handling functions
 def load_data():
@@ -691,10 +698,19 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
             
             # Update days in month when year or month changes
             def update_days(year, month):
-                year = int(year)
-                month = int(month)
-                days = get_days_in_month(year, month)
-                return gr.update(choices=[str(d) for d in range(1, days + 1)])
+                # 添加对None值的处理
+                if year is None or month is None:
+                    # 返回空列表或默认31天
+                    return gr.update(choices=[str(d) for d in range(1, 32)])
+                
+                try:
+                    year = int(year)
+                    month = int(month)
+                    days = get_days_in_month(year, month)
+                    return gr.update(choices=[str(d) for d in range(1, days + 1)])
+                except (ValueError, TypeError):
+                    # 如果转换失败，返回默认31天
+                    return gr.update(choices=[str(d) for d in range(1, 32)])
             
             year_dropdown.change(
                 fn=update_days, 
@@ -911,6 +927,10 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
             # Define send_to_ai function
             def send_to_ai(start_year, start_month, start_day, end_year, end_month, end_day):
                 try:
+                    # 检查是否有任何输入为None
+                    if None in [start_year, start_month, start_day, end_year, end_month, end_day]:
+                        return "请完整填写开始日期和结束日期。"
+                        
                     # Format dates
                     start_date = format_date(int(start_year), int(start_month), int(start_day))
                     end_date = format_date(int(end_year), int(end_month), int(end_day))
@@ -927,59 +947,76 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
                     # Include all required fields: date, items, and reviews
                     extracted_data = [
                         {
-                            "date": entry["date"],        # Learning date in yyyy-MM-dd format
-                            "items": entry["items"],      # Learning items (up to 3 strings)
-                            "reviews": entry["reviews"]   # Review data (7 objects with dueDate and completed fields)
+                            "date": entry["date"],
+                            "items": entry["items"],
+                            "reviews": entry["reviews"]
                         } for entry in filtered_data
                     ]
                     
-                    # Create payload with data and instructions
-                    payload = {
-                        "data": extracted_data,
-                        "instructions": """请分析用户提供的学习数据，数据包含以下字段：date：学习日期，格式为"yyyy-MM-dd"。items：学习项目，最多三个，每个项目为字符串。reviews：复习情况，包含七个对象，每个对象有dueDate（复习日期）和completed（是否完成）两个字段。
-基于这些数据，请完成以下任务：分析用户最近的学习情况，包括学习频率、学习内容的种类和分布。统计复习任务的完成情况，指出哪些复习阶段的完成率较高或较低。提供学习和复习的改进建议，帮助用户优化学习计划和方法。以清晰、简洁的方式呈现分析结果，便于用户理解和应用。"""
-                    }
+                    # Prepare the analysis request content
+                    analysis_request = f"""请分析以下学习数据：
+
+时间范围：{start_date} 至 {end_date}
+
+学习记录：
+{json.dumps(extracted_data, ensure_ascii=False, indent=2)}
+
+请从以下几个方面进行分析：
+1. 学习频率：分析用户的学习频率和规律
+2. 学习内容：分析学习内容的种类和分布
+3. 复习完成情况：统计各阶段复习任务的完成率
+4. 改进建议：基于以上分析，提供具体的改进建议
+
+请用清晰、结构化的方式呈现分析结果。"""
+
+                    # 添加状态提示
+                    yield "正在分析数据，请稍候..."
                     
-                    # API endpoint (should be replaced with actual endpoint)
-                    API_URL = "https://your-api-endpoint.com/analyze"
-                    
-                    # Send request to AI API
-                    response = requests.post(API_URL, json=payload)
-                    
-                    if response.status_code == 200:
-                        try:
-                            result = response.json()
-                            
-                            # Parse the AI analysis results
-                            frequency = result.get("learning_frequency", "No data available")
-                            distribution = result.get("content_distribution", "No data available")
-                            completion = result.get("review_completion", "No data available")
-                            suggestions = result.get("suggestions", [])
-                            
-                            # Format as Markdown
-                            markdown = (
-                                f"**学习频率分析:**\n{frequency}\n\n"
-                                f"**学习内容分布:**\n{distribution}\n\n"
-                                f"**复习完成情况:**\n{completion}\n\n"
-                                f"**改进建议:**\n"
-                            )
-                            
-                            for sugg in suggestions:
-                                markdown += f"- {sugg}\n"
+                    try:
+                        # Send request to ModelScope API
+                        response = client.chat.completions.create(
+                            model='deepseek-reasoner',
+                            messages=[
+                                {
+                                    'role': 'system',
+                                    'content': '你是一个专业的学习分析助手，擅长分析学习数据并提供有价值的建议。'
+                                },
+                                {
+                                    'role': 'user',
+                                    'content': analysis_request
+                                }
+                            ],
+                            stream=True
+                        )
+                        
+                        # 初始文本
+                        collected_text = "正在分析数据，请稍候...\n\n"
+                        
+                        # 流式处理响应
+                        for chunk in response:
+                            # 获取当前块中的内容
+                            if hasattr(chunk.choices[0].delta, 'content') and chunk.choices[0].delta.content:
+                                content = chunk.choices[0].delta.content
+                                collected_text += content
+                                # 将累积的文本发送回前端
+                                yield collected_text
                                 
-                            return markdown
-                        except json.JSONDecodeError:
-                            return "API 响应不是有效的 JSON 格式。"
-                    else:
-                        return f"API 请求失败，状态码: {response.status_code}"
+                        # 如果没有收到任何内容，返回错误消息
+                        if collected_text == "正在分析数据，请稍候...\n\n":
+                            yield collected_text + "API返回了空响应，请稍后重试。"
+                            
+                    except Exception as e:
+                        yield f"正在分析数据，请稍候...\n\n\nAI分析API调用失败: {str(e)}\n\n请检查网络连接或API密钥是否有效。"
+
                 except Exception as e:
-                    return f"错误: {str(e)}"
+                    yield f"错误: {str(e)}"
             
             # Connect the button to the function
             send_to_ai_btn.click(
                 fn=send_to_ai,
                 inputs=[start_year, start_month, start_day, end_year, end_month, end_day],
-                outputs=[ai_result_md]
+                outputs=ai_result_md,
+                queue=True  # 启用队列以支持流式输出
             )
     
 # Add learning entry event
