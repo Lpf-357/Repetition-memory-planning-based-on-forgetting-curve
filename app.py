@@ -896,14 +896,14 @@ with gr.Blocks(title="间隔重复记忆应用") as app:
             with gr.Row():
                 gr.Markdown("#### 开始日期")
             with gr.Row():
-                start_year = gr.Dropdown(label="年", choices=[str(y) for y in range(2023, 2027)], value=None)
+                start_year = gr.Dropdown(label="年", choices=[str(y) for y in range(2025, 2028)], value=None)
                 start_month = gr.Dropdown(label="月", choices=[str(m) for m in range(1, 13)], value=None)
                 start_day = gr.Dropdown(label="日", choices=[str(d) for d in range(1, 32)], value=None)
             
             with gr.Row():
                 gr.Markdown("#### 结束日期")
             with gr.Row():
-                end_year = gr.Dropdown(label="年", choices=[str(y) for y in range(2023, 2027)], value=None)
+                end_year = gr.Dropdown(label="年", choices=[str(y) for y in range(2025, 2028)], value=None)
                 end_month = gr.Dropdown(label="月", choices=[str(m) for m in range(1, 13)], value=None)
                 end_day = gr.Dropdown(label="日", choices=[str(d) for d in range(1, 32)], value=None)
             
